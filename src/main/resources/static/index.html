@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+          content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>Document</title>
+    <style>
+        body {
+            margin-left: auto;
+            margin-right: auto;
+            width: 50%;
+        }
+        input, button, select {
+            margin: 5px;
+            height: 30px;
+        }
+    </style>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.6.1/sockjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js" integrity="sha512-iKDtgDyTHjAitUDdLljGhenhPwrbBfqTKWO1mkhSFH3A7blITC9MhYon6SjnMhp4o0rADGw9yAC6EW4t5a4K3g==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+</head>
+<body>
+
+    <div id="app">
+        <h1>{{ title }}</h1>
+        <hr/>
+        <div style="display: flex; flex-direction: row; gap: 60px">
+            <div>
+                <label v-if="!loggedInUser">
+                    Select User to Login: <br/>
+                    <select v-model="userId">
+                        <option value="" disabled>Select User</option>
+                        <option :value="u" v-for="u in availableUsers">{{u}}</option>
+                    </select>
+                    <button @click="connect(userId)">Connect</button>
+                </label>
+                <label v-else>
+                    <button @click="disconnect">Disconnect</button>
+                </label>
+            </div>
+            <div v-if="wsStatus">
+                <p>Welcome : {{ loggedInUser }}</p>
+                <hr/>
+                <label>
+                    Message:
+                    <select v-model="message.recipient">
+                        <option value="" disabled>Select User</option>
+                        <option :value="u" v-for="u in availableUsers">{{u}}</option>
+                    </select>
+                    <input type="text" v-model="message.content">
+                    <button @click="sendMessage(loggedInUser)">Send</button>
+                </label>
+            </div>
+            <div v-if="wsStatus">
+                <p v-for="m in messages">FROM: {{m.sender}} , content: {{m.content}}</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp, ref } = Vue
+        createApp({
+            setup() {
+                const title = ref('Hello World')
+                const message = ref({
+                    recipient: '',
+                    content: ''
+                })
+                const stompClient = ref(null)
+                const userId = ref(null)
+                const loggedInUser = ref(null)
+                const wsStatus = ref(false)
+                const availableUsers = ref([1, 2])
+                const messages = ref([])
+
+                const disconnect = () => {
+                    if (stompClient.value !== null) {
+                        stompClient.value.disconnect({},(frame) => {
+                            console.log('Disconnected: ' + frame);
+                        });
+                    }
+                    wsStatus.value = false;
+                }
+
+                const connect = (uId) => {
+                    const socket = new SockJS('/ws',{'uId': uId});
+                    stompClient.value = Stomp.over(socket);
+                    userId.value = null;
+                    loggedInUser.value = uId;
+
+                    stompClient.value.connect({uId: uId}, frame => {
+                        console.log('Connected: ' + frame);
+                        console.log('frame.headers: ' + JSON.stringify(frame.headers));
+                        wsStatus.value = true;
+
+                        stompClient.value.subscribe('/user/queue/messages', (msg) => {
+                            console.log(`Received: ${msg.body}`);
+                            messages.value.push(JSON.parse(msg.body));
+                        },{ 'auto-delete': true, 'x-message-ttl': 6000, id: uId});
+                    },(error) => {
+                        console.log('Connection error: ' + error);
+                    });
+                }
+
+                const sendMessage = (sender) => {
+                    stompClient.value.send('/app/message', {'userid': loggedInUser.value}, JSON.stringify({sender: sender, ...message.value}));
+                    stompClient.value.send('/app/message/v2', {'userid': loggedInUser.value}, JSON.stringify({sender: sender, ...message.value}));
+                    message.value = {
+                        recipient: null,
+                        content: ''
+                    };
+                }
+
+                return {
+                    title, message, sendMessage, userId, connect, wsStatus, loggedInUser, disconnect, availableUsers, messages
+                }
+            }
+        }).mount('#app')
+    </script>
+</body>
+</html>
